@@ -32,8 +32,8 @@ const init_script = `
 	grid [ttk::frame .c -padding "10 10 10 10"] -column 0 -row 0 -sticky nwes
 	grid columnconfigure . 0 -weight 1; grid rowconfigure . 0 -weight 1
 
-	ttk::button .b1 -text "Start 1" -command "proc1 <- 0" -state disabled -width 10
-	grid .b1 -column 0 -row 1 -padx 2 -pady 2 -sticky nwse
+	ttk::button .b -text "Start" -command "proc <- 0" -state disabled -width 10
+	grid .b -column 0 -row 1 -padx 2 -pady 2 -sticky nwse
 
 	foreach w [winfo children .c] {grid configure $w -padx 5 -pady 5}
 `
@@ -71,10 +71,10 @@ func imageToRGBA(src image.Image) *image.RGBA {
 	return m
 }
 
-func proc(ir *gothic.Interpreter, num string, labelid string, animage *image.RGBA) {
-	button := ".b" + num
-	channame := "proc" + num
-	recv := make(chan int)
+func proc(ir *gothic.Interpreter, labelid string, animage *image.RGBA) {
+	button := ".b"
+	channame := "proc"
+	recv := make(chan int, 1)
 
 	fmt.Printf("here")
 	s1 := rand.NewSource(42)
@@ -85,21 +85,36 @@ func proc(ir *gothic.Interpreter, num string, labelid string, animage *image.RGB
 
 	// register channel and enable button
 	ir.RegisterCommand(channame, func(_ string, arg int) {
-		recv <- arg
+		select {
+			case recv <- arg:
+			default:
+				println("! Blocked", arg)
+		}
 		fmt.Printf("Command received: running = %d\n", running)
 	})
 	ir.Eval(`%{} configure -state normal`, button)
 
 	for {
 		// wait for an event
-		<-recv
+		select {
+			case <- recv:
+				println("Got something", running)
+				break
+			default:
+				println("! got nothing", running)
+				time.Sleep(time.Second / 10)
+				continue
+		}
+		//fmt.Printf("Received %d\n", arg)
+
 		if running {
 			fmt.Printf("continuing instead\n")
 			continue
 		}
 		running = true
 		fmt.Printf("Starting run\n")
-		ir.Eval(`%{} configure -state disabled -text "Running"`, button)
+		//ir.Eval(`%{} configure -state disabled -text "Running"`, button)
+		ir.Eval(`%{} configure -state normal -text "Stop"`, button)
 		sizex := 800
 		sizey := 600
 		sizex /= 2
@@ -113,7 +128,7 @@ func proc(ir *gothic.Interpreter, num string, labelid string, animage *image.RGB
 		}
 
 		l := gothlife.NewLife(sizex, sizey)
-		for i := 0; i < 1; i++ {
+		for i := 0; i < 10; i++ {
 			l.Step()
 			for x := 0; x < sizex; x++ {
 				for y := 0; y < sizey; y++ {
@@ -135,8 +150,9 @@ func proc(ir *gothic.Interpreter, num string, labelid string, animage *image.RGB
 			time.Sleep(time.Second / 120)
 		}
 		// reset button state
-		ir.Eval(`%{} configure -state normal -text "Start %{}"`, button, num)
+		ir.Eval(`%{} configure -state normal -text "Start"`, button)
 		running = false
+		fmt.Printf("Ending run\n")
 	}
 }
 
@@ -147,6 +163,6 @@ func main() {
 	ir.UploadImage("bg", animage)
 	ir.Eval(`ttk::label %{} -image bg`, labelid)
 	ir.Eval(`grid %{} -column 0 -row 5 -sticky w`, labelid)
-	go proc(ir, "1", labelid, animage)
+	go proc(ir, labelid, animage)
 	<-ir.Done
 }
